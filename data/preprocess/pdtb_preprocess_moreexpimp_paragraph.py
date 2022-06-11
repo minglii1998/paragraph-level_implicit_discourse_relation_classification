@@ -2,7 +2,7 @@ import os
 import sys
 import re
 import itertools
-import cPickle
+import pickle as cPickle
 import copy
 import numpy as np
 
@@ -13,18 +13,18 @@ import gensim
 import nltk
 from nltk.tag import StanfordPOSTagger,StanfordNERTagger
 from nltk.parse.stanford import StanfordDependencyParser
-from nltk.tokenize import StanfordTokenizer
+# from nltk.tokenize import StanfordTokenizer
 
 
 # Load Google pretrained word2vec
-model = gensim.models.Word2Vec.load_word2vec_format('../resource/GoogleNews-vectors-negative300.bin', binary=True)
+model = gensim.models.KeyedVectors.load_word2vec_format('data/resource/GoogleNews-vectors-negative300.bin', binary=True)
 # Load Glove pretrained word2vec
 #model = gensim.models.Word2Vec.load_word2vec_format('../resource/glove.840B.300d.w2vformat.txt', binary=False)
 
 # Load stored pos/ner parsing sentence
 sentence_pos_ner_dict = {}
-with open('../resource/pdtb_sentence_pos_ner_dict.pkl','r') as f:
-	sentence_pos_ner_dict = cPickle.load(f)
+with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','rb') as f:
+	sentence_pos_ner_dict = cPickle.load(f, encoding="latin1")
 	f.close()
 
 #stanford_dir = '../resource/stanford-postagger-2016-10-31/'
@@ -213,7 +213,7 @@ def process_sentence(sentence, posner_flag = True, sentencemarker = False, param
 
 def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemarker = False, connectivemarker = False):
 	global para_length_list
-	print "total number of documents:" + str(len(fold_discourse_relation_list))
+	print( "total number of documents:" + str(len(fold_discourse_relation_list)))
 	y_total = torch.zeros(len(discourse_sense_list))
 	y_explicit =  torch.zeros(len(discourse_sense_list))
 	y_implicit =  torch.zeros(len(discourse_sense_list))
@@ -227,7 +227,7 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 
 	for i in range(len(fold_discourse_relation_list)):
 		if i % 10 == 0:
-			print i
+			print( i)
 
 		doc_sentence_list,doc_discourse_dict = fold_discourse_relation_list[i][0],fold_discourse_relation_list[i][1]
 		paras_sentence_list,paras_y_list= process_doc_paras_labels(doc_sentence_list, doc_discourse_dict)
@@ -236,8 +236,8 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 			continue
 
 		for para_sentence_list, y in zip(paras_sentence_list, paras_y_list):
-			print para_sentence_list
-			print y
+			print (para_sentence_list)
+			print (y)
 
 			para_length_list.append(len(para_sentence_list))
 			#para_sentence_lists.append(para_sentence_list)
@@ -284,12 +284,12 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 		cPickle.dump([para_sentence_lists,y_list],f)
 		f.close()'''
 
-	print 'Discourse relation distribution'
-	print y_total
-	print 'Explicit discourse relation distribution'
-	print y_explicit
-	print 'Implicit discourse relation distribution'
-	print y_implicit
+	print( 'Discourse relation distribution')
+	print( y_total)
+	print( 'Explicit discourse relation distribution')
+	print( y_explicit)
+	print( 'Implicit discourse relation distribution')
+	print( y_implicit)
 	
 	if connectivemarker:
 		return (para_embedding_list,para_label_length_list,eos_position_lists,connective_position_lists),y_list
@@ -601,7 +601,7 @@ def extract_explicit_relation(pipe_file_lines,doc_sentence_list,doc_discourse_di
 			sentence = doc_sentence_list[arg1_index]
 			flag = False
 
-			for k in range(len(arg1.split())/2+1):
+			for k in range(int(len(arg1.split())/2)+1):
 				tmp_arg1 = ' '.join(arg1.split(' ')[k:])
 				for j in range(len(sentence)):
 					if sentence[j] in [',',':',';','.','-','?','!',' ']:
@@ -614,7 +614,7 @@ def extract_explicit_relation(pipe_file_lines,doc_sentence_list,doc_discourse_di
 					break
 
 			if not flag:			
-				for k in range(1,len(arg1.split())/2+1):
+				for k in range(1,int(len(arg1.split())/2)+1):
 					tmp_arg1 = ' '.join(arg1.split(' ')[:-k])
 					for j in range(len(sentence)):
 						if sentence[j] in [',',':',';','.','-','?','!',' ']:
@@ -636,7 +636,7 @@ def extract_explicit_relation(pipe_file_lines,doc_sentence_list,doc_discourse_di
 			replace_arg1 = arg2
 			replace_arg2 = arg1
 
-			for k in range(len(replace_arg1.split())/2+1):
+			for k in range(int(len(replace_arg1.split())/2)+1):
 				tmp_arg1 = ' '.join(replace_arg1.split(' ')[k:])
 				for j in range(len(sentence)):
 					if sentence[j] in [',',':',';','.','-','?','!',' ']:
@@ -649,7 +649,7 @@ def extract_explicit_relation(pipe_file_lines,doc_sentence_list,doc_discourse_di
 					break
 
 			if not flag:			
-				for k in range(1,len(replace_arg1.split())/2+1):
+				for k in range(1,int(len(replace_arg1.split())/2)+1):
 					tmp_arg1 = ' '.join(replace_arg1.split(' ')[:-k])
 					for j in range(len(sentence)):
 						if sentence[j] in [',',':',';','.','-','?','!',' ']:
@@ -755,7 +755,7 @@ explicit_filter_count = 0
 double_label_count = 0
 def process_doc(pipe_file_path,raw_file_path):
 	pipe_file = open(pipe_file_path,'r')
-	raw_file = open(raw_file_path,'r')
+	raw_file = open(raw_file_path,'r',encoding = "ISO-8859-1")
 
 	pipe_file_lines = pipe_file.readlines()
 	raw_file_lines =  raw_file.readlines()
@@ -780,11 +780,11 @@ def process_doc(pipe_file_path,raw_file_path):
 def process_fold(fold_list):
 	fold_doc_list = []
 
-	pipe_file_path = './dataset/pdtb_v2/data_t/pdtb/'
-	raw_file_path = './dataset/pdtb_v2/data/raw/wsj/'
+	pipe_file_path = 'data/preprocess/dataset/pdtb_v2/data_t/pdtb'
+	raw_file_path = 'data/preprocess/dataset/pdtb_v2/data/raw/wsj'
 
 	for fold in fold_list:
-		print 'fold: ' + str(fold)
+		print( 'fold: ' + str(fold))
 		fold_pipe_file_path = os.path.join(pipe_file_path,fold)
 		fold_raw_file_path = os.path.join(raw_file_path,fold)
 
@@ -812,14 +812,14 @@ test_fold_list = ['21','22']
 dev_X,dev_Y = process_fold(dev_fold_list)
 train_X,train_Y = process_fold(training_fold_list)
 test_X, test_Y = process_fold(test_fold_list)
-print 'implicit filter count: ' + str(implicit_filter_count)
-print 'explicit filter count: ' + str(explicit_filter_count)
-print 'explicit count: ' + str(explicit_count)
-print 'double label count: ' + str(double_label_count)
-print 'average para length: ' + str(sum(para_length_list) / float(len(para_length_list)))
-print 'para length distribution: ' + str(np.unique(para_length_list, return_counts=True))
+print( 'implicit filter count: ' + str(implicit_filter_count))
+print( 'explicit filter count: ' + str(explicit_filter_count))
+print( 'explicit count: ' + str(explicit_count))
+print( 'double label count: ' + str(double_label_count))
+print( 'average para length: ' + str(sum(para_length_list) / float(len(para_length_list))))
+print( 'para length distribution: ' + str(np.unique(para_length_list, return_counts=True)))
 
-with open('../resource/pdtb_sentence_pos_ner_dict.pkl','w') as f:
+with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','w') as f:
 	cPickle.dump(sentence_pos_ner_dict,f)
 	f.close()
 
@@ -831,5 +831,5 @@ pdtb_data['train_Y'] = train_Y
 pdtb_data['test_X'] = test_X
 pdtb_data['test_Y'] = test_Y
 
-outfile = open('data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt','w')
+outfile = open('data/pdtb_try.pt','w')
 torch.save(pdtb_data,outfile)

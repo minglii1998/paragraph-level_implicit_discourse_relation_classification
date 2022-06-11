@@ -1,5 +1,7 @@
 import sys
 import os
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2' 
+
 import random
 
 import torch
@@ -7,13 +9,16 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from model import BaseSequenceLabelingSplitImpExp
+# from model import BaseSequenceLabelingSplitImpExp
+from model import BaseSequenceLabelingSplitImpExp_SA as BaseSequenceLabelingSplitImpExp
 
 from sklearn import metrics
 import numpy as np
-import cPickle
+# import cPickle
 import copy
 
+import warnings
+warnings.filterwarnings('ignore')
 
 ######################################################################
 # This is a helper function to print time elapsed and estimated time
@@ -21,6 +26,9 @@ import copy
 
 import time
 import math
+
+from logging_utils import SelfLogger
+logger = SelfLogger('sa_model')
 
 def asMinutes(s):
     m = math.floor(s / 60)
@@ -37,9 +45,9 @@ def timeSince(since, percent):
 
 use_cuda = torch.cuda.is_available()
 if use_cuda:
-    print ("Using GPU!")
+    logger.write_traing_log("Using GPU!")
 else:
-    print ("Using CPU!")
+    logger.write_traing_log("Using CPU!")
 
 def feed_data_cuda(data):
     if use_cuda:
@@ -48,7 +56,7 @@ def feed_data_cuda(data):
                 X[i] = X[i].cuda()
 
 def apply_weighted_class(Y):
-    print 'Weighting class...'
+    logger.write_traing_log('Weighting class...')
 
     weights = Variable(torch.zeros((Y[0].size(-1))), requires_grad = False)
     for y in Y:
@@ -62,10 +70,11 @@ def apply_weighted_class(Y):
 
 
 def load_data(weighted_class = False):
-    print 'Loading Data...'
-    outfile = open(os.path.join(os.getcwd(),'data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt'),'r')
-    pdtb_data = torch.load(outfile)
-    outfile.close()
+    logger.write_traing_log('Loading Data...')
+    # outfile = open(os.path.join(os.getcwd(),'data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt'),'r')
+    pdtb_data = torch.load('data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt')
+    # (All the Words/POS/NER/label(both implict&explicit) and discourse unit (DU) boundary information are already transformed to Pytorch vector format)
+    # outfile.close()
 
     dev_X,dev_Y,train_X,train_Y,test_X,test_Y = pdtb_data['dev_X'],pdtb_data['dev_Y'],pdtb_data['train_X'] ,pdtb_data['train_Y'],pdtb_data['test_X'],pdtb_data['test_Y']
 
@@ -124,7 +133,7 @@ def train(model,X,Y,optimizer,criterion,alpha = 1):
     total_norm = nn.utils.clip_grad_norm(model.parameters(), 5.0)
 
     optimizer.step()
-    return loss.data[0]
+    return loss.data 
 
 def process_label(predict_Y,target_Y):
     assert predict_Y.shape == target_Y.shape
@@ -160,22 +169,22 @@ def process_label(predict_Y,target_Y):
 def print_evaluation_result(result):
     predict_Y,target_Y,loss = result[0],result[1],result[2]
 
-    print 'Confusion Metric'
-    print metrics.confusion_matrix(target_Y,predict_Y)
-    print 'Accuracy'
-    print metrics.accuracy_score(target_Y, predict_Y)
-    print 'loss'
-    print loss
-    print 'Micro Precision/Recall/F-score'
-    print metrics.precision_recall_fscore_support(target_Y, predict_Y, average='micro') 
-    print 'Macro Precision/Recall/F-score'
-    print metrics.precision_recall_fscore_support(target_Y, predict_Y, average='macro') 
-    print 'Each-class Precision/Recall/F-score'
-    print metrics.precision_recall_fscore_support(target_Y, predict_Y, average=None) 
+    logger.write_traing_log('Confusion Metric')
+    logger.write_traing_log(str(metrics.confusion_matrix(target_Y,predict_Y)))
+    logger.write_traing_log('Accuracy')
+    logger.write_traing_log(str(metrics.accuracy_score(target_Y, predict_Y)))
+    logger.write_traing_log('loss')
+    logger.write_traing_log(str(loss))
+    logger.write_traing_log('Micro Precision/Recall/F-score')
+    logger.write_traing_log(str(metrics.precision_recall_fscore_support(target_Y, predict_Y, average='micro') ))
+    logger.write_traing_log('Macro Precision/Recall/F-score')
+    logger.write_traing_log(str(metrics.precision_recall_fscore_support(target_Y, predict_Y, average='macro')) )
+    logger.write_traing_log('Each-class Precision/Recall/F-score')
+    logger.write_traing_log(str(metrics.precision_recall_fscore_support(target_Y, predict_Y, average=None) ))
 
     return metrics.precision_recall_fscore_support(target_Y, predict_Y, average='macro')[2], result
 
-def evaluate(model,X,Y, discourse = 'implicit'):
+def evaluate(model,X,Y, criterion, epoch, alpha, discourse = 'implicit'):
     model.eval()
     X_eos_list = X[1]
     X = X[0]
@@ -183,6 +192,7 @@ def evaluate(model,X,Y, discourse = 'implicit'):
     predict_Y_list = []
     target_Y_list = []
     loss = 0
+    loss_ = 0
 
     for i in range(len(Y)):
         sample = X[i]
@@ -190,6 +200,7 @@ def evaluate(model,X,Y, discourse = 'implicit'):
         target = Y[i]
 
         predict = model(sample, sample_eos_list, target)
+        loss_ += calculate_loss(predict,target,criterion, alpha = alpha)
 
         if discourse == 'all':
             target = target.abs()
@@ -213,6 +224,9 @@ def evaluate(model,X,Y, discourse = 'implicit'):
 
             predict_Y_list.append(predict)
             target_Y_list.append(target)
+
+    logger.tb_writer.add_scalar('2_test_valid_loss/'+ discourse +'loss',loss_,epoch)
+    logger.tb_writer.add_scalar('3_test_valid_loss/'+ discourse +'loss',loss,epoch)
 
     predict_Y = np.concatenate(predict_Y_list,axis=0)
     target_Y = np.concatenate(target_Y_list,axis=0)
@@ -256,7 +270,7 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
     elif optimizer_type == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum = 0.9, weight_decay = weight_decay)
     else:
-        print "optimizer not recommend for the task!"
+        logger.write_traing_log("optimizer not recommend for the task!")
         sys.exit()
 
     if use_scheduler:
@@ -269,15 +283,15 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
     X = X[0]
 
     start = time.time()
-    random_list = range(len(Y))
+    random_list = [i for i in range(len(Y))]
     print_loss_total = 0  # Reset every print_every
     best_macro_Fscore = -1
     best_result = None
     best_model = None
-    print '----------------------------------------------------'
-    print 'Training start: ' + '#training_samples = ' + str(len(Y))
+    logger.write_traing_log('----------------------------------------------------')
+    logger.write_traing_log('Training start: ' + '#training_samples = ' + str(len(Y)))
     for epoch in range(1, n_epochs + 1):
-        print 'epoch ' + str(epoch) + '/' + str(n_epochs)
+        logger.write_traing_log('epoch ' + str(epoch) + '/' + str(n_epochs))
         random.shuffle(random_list)
 
         i = 0
@@ -307,22 +321,23 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
         if epoch % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
-            print('%s (%d %d%%) %.4f' % (timeSince(start, epoch*1.0/ n_epochs), epoch, epoch*1.0 / n_epochs * 100, print_loss_avg))
+            logger.write_traing_log('%s (%d %d%%) %.4f' % (timeSince(start, epoch*1.0/ n_epochs), epoch, epoch*1.0 / n_epochs * 100, print_loss_avg))
+            logger.tb_writer.add_scalar('1_training_loss/loss',print_loss_avg,epoch)
 
         if epoch % evaluate_every == 0:
-            print '----------------------------------------------------'
-            print 'Step Evaluation: #valid_samples= ' + str(len(valid_Y))
-            print 'Evaluate on Explicit/Implicit discourse relation'
-            print '----------------------------------------------------'
-            _, tmp_all_result = evaluate(model,valid_X,valid_Y, discourse = 'all')
+            logger.write_traing_log('----------------------------------------------------')
+            logger.write_traing_log('Step Evaluation: #valid_samples= ' + str(len(valid_Y)))
+            logger.write_traing_log('Evaluate on Explicit/Implicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
+            _, tmp_all_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha, discourse = 'all')
 
-            print 'Evaluate on Explicit discourse relation'
-            print '----------------------------------------------------'
-            _, tmp_explicit_result = evaluate(model,valid_X,valid_Y, discourse = 'explicit')
+            logger.write_traing_log( 'Evaluate on Explicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
+            _, tmp_explicit_result = evaluate(model,valid_X,valid_Y,  criterion, epoch, alpha = alpha, discourse = 'explicit')
 
-            print 'Evaluate on Implicit discourse relation'
-            print '----------------------------------------------------'
-            tmp_macro_Fscore, tmp_implicit_result = evaluate(model,valid_X,valid_Y, discourse = 'implicit')
+            logger.write_traing_log( 'Evaluate on Implicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
+            tmp_macro_Fscore, tmp_implicit_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha,discourse = 'implicit')
             
             if tmp_macro_Fscore > best_macro_Fscore:
                 best_macro_Fscore = tmp_macro_Fscore
@@ -332,14 +347,14 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
             if use_scheduler:
                 scheduler.step(tmp_macro_Fscore)
 
-    print 'Training completed!'
+    logger.write_traing_log( 'Training completed!')
     return best_macro_Fscore,best_result,best_model
 
 batch_size_list = [128]  # fixed 128 > 64 > 256
 hidden_size_list = [300] # 600>300>100
 dropout_list = [5]
 l2_reg_list = [0]   # fixed 0
-nb_epoch_list = [50]
+nb_epoch_list = [100]
 encoder_sentence_embedding_type_list = ['max'] # max > mean > last
 sentence_zero_inithidden_list = [False]
 optimizer_type_list = ['adam']  # adam > adagrad > other
@@ -380,10 +395,11 @@ if __name__ == "__main__":
         each_iteration_best_model_list = [] 
         each_iteration_macro_Fscore_list = []
 
-        for iteration in range(10):
+        for iteration in range(5):
+            logger.change_iter_num(iteration)
             model = BaseSequenceLabelingSplitImpExp(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
                     sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
-
+            logger.write_model(model)
             #model = BaseSequenceLabelingSplitImpExp_LSTMEncoder(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
             #        sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'dot', NTN_flag = True, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
 
@@ -394,18 +410,18 @@ if __name__ == "__main__":
                                                     batch_size = parameters['batch_size'], n_epochs = parameters['nb_epoch'], optimizer_type = parameters['optimizer_type'], 
                                                     weight_decay = parameters['weight_decay'], alpha = 1, use_scheduler = False)
             
-            print '----------------------------------------------------'
-            print 'Experiment Iteration ' +  str(iteration+1) + ' Evaluation: #test_samples= ' + str(len(test_Y))
-            print 'Evaluate on Explicit/Implicit discourse relation'
-            print '----------------------------------------------------'
+            logger.write_traing_log( '----------------------------------------------------')
+            logger.write_traing_log( 'Experiment Iteration ' +  str(iteration+1) + ' Evaluation: #test_samples= ' + str(len(test_Y)))
+            logger.write_traing_log( 'Evaluate on Explicit/Implicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
             print_evaluation_result(best_result[0])
 
-            print 'Evaluate on Explicit discourse relation'
-            print '----------------------------------------------------'
+            logger.write_traing_log( 'Evaluate on Explicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
             print_evaluation_result(best_result[1])
 
-            print 'Evaluate on Implicit discourse relation'
-            print '----------------------------------------------------'
+            logger.write_traing_log( 'Evaluate on Implicit discourse relation')
+            logger.write_traing_log( '----------------------------------------------------')
             print_evaluation_result(best_result[2])
 
             each_iteration_result_list.append(best_result)
@@ -416,43 +432,41 @@ if __name__ == "__main__":
                 overall_best_result = best_result
                 overall_best_model = best_model
 
-        print '--------------------------------------------------------------------------'
-        print 'Overall Best Result:'
-        print 'Evaluate on Explicit/Implicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('--------------------------------------------------------------------------')
+        logger.write_traing_log('Overall Best Result:')
+        logger.write_traing_log('Evaluate on Explicit/Implicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         print_evaluation_result(overall_best_result[0])
 
-        print 'Evaluate on Explicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('Evaluate on Explicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         print_evaluation_result(overall_best_result[1])
 
-        print 'Evaluate on Implicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('Evaluate on Implicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         print_evaluation_result(overall_best_result[2])
 
 
         overall_average_result = average_result(each_iteration_result_list)
-        print '-------------------------------------------------------------------------'
-        print 'Overall Average Result:'
-        print 'Evaluate on Explicit/Implicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('-------------------------------------------------------------------------')
+        logger.write_traing_log('Overall Average Result:')
+        logger.write_traing_log('Evaluate on Explicit/Implicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         print_evaluation_result(overall_average_result[0])
 
-        print 'Evaluate on Explicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('Evaluate on Explicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         print_evaluation_result(overall_average_result[1])
 
-        print 'Evaluate on Implicit discourse relation'
-        print '-------------------------------------------------------------------------'
+        logger.write_traing_log('Evaluate on Implicit discourse relation')
+        logger.write_traing_log('-------------------------------------------------------------------------')
         macro_F1_list.append(print_evaluation_result(overall_average_result[2])[0])
 
-        print 'Implicit discourse relation classification Macro F_score std:' + str(np.std(each_iteration_macro_Fscore_list))
+        logger.write_traing_log('Implicit discourse relation classification Macro F_score std:' + str(np.std(each_iteration_macro_Fscore_list)))
 
-        print str(parameters)
+        logger.write_traing_log(str(parameters))
         sys.stdout.flush()
 
-    print '-------------------------------------------------------------------------'
-    print '-------------------------------------------------------------------------'
-    print '-------------------------------------------------------------------------'
+    logger.write_traing_log( '-------------------------------------------------------------------------')
     for i in range(len(parameters_list)):
-        print str(parameters_list[i]) + '       macro F-1:  ' + str(macro_F1_list[i]) + '\n'
+        logger.write_traing_log(str(parameters_list[i]) + '       macro F-1:  ' + str(macro_F1_list[i]) + '\n')
