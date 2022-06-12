@@ -9,8 +9,8 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-# from model import BaseSequenceLabelingSplitImpExp
-from model import BaseSequenceLabelingSplitImpExp_SA as BaseSequenceLabelingSplitImpExp
+from model import BaseSequenceLabelingSplitImpExp
+from model import BaseSequenceLabelingSplitImpExp_SA 
 
 from sklearn import metrics
 import numpy as np
@@ -20,6 +20,8 @@ import copy
 import warnings
 warnings.filterwarnings('ignore')
 
+from temp_config import temp_config_model_name, temp_config_data_path, temp_config_logger
+
 ######################################################################
 # This is a helper function to print time elapsed and estimated time
 # remaining given the current time and progress %.
@@ -28,7 +30,7 @@ import time
 import math
 
 from logging_utils import SelfLogger
-logger = SelfLogger('sa_model')
+logger = SelfLogger(temp_config_logger)
 
 def asMinutes(s):
     m = math.floor(s / 60)
@@ -72,7 +74,7 @@ def apply_weighted_class(Y):
 def load_data(weighted_class = False):
     logger.write_traing_log('Loading Data...')
     # outfile = open(os.path.join(os.getcwd(),'data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt'),'r')
-    pdtb_data = torch.load('data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt')
+    pdtb_data = torch.load(temp_config_data_path)
     # (All the Words/POS/NER/label(both implict&explicit) and discourse unit (DU) boundary information are already transformed to Pytorch vector format)
     # outfile.close()
 
@@ -397,7 +399,11 @@ if __name__ == "__main__":
 
         for iteration in range(5):
             logger.change_iter_num(iteration)
-            model = BaseSequenceLabelingSplitImpExp(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
+            if temp_config_model_name == 'ori':
+                model = BaseSequenceLabelingSplitImpExp(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
+                    sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
+            elif temp_config_model_name == 'sa':
+                model = BaseSequenceLabelingSplitImpExp_SA(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
                     sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
             logger.write_model(model)
             #model = BaseSequenceLabelingSplitImpExp_LSTMEncoder(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 

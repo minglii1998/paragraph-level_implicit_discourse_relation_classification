@@ -18,8 +18,8 @@ from transformers import T5Tokenizer, T5EncoderModel
 from zmq import device
 
 device = 'cpu'
-t5_tokenizer = T5Tokenizer.from_pretrained("t5-base",cache_dir="../cache/")
-t5_model =  T5EncoderModel.from_pretrained("t5-base",cache_dir="../cache/").to(device)
+t5_tokenizer = T5Tokenizer.from_pretrained("t5-large",cache_dir="../cache/")
+t5_model =  T5EncoderModel.from_pretrained("t5-large",cache_dir="../cache/").to(device)
 
 # Load Google pretrained word2vec
 # model = gensim.models.KeyedVectors.load_word2vec_format('data/resource/GoogleNews-vectors-negative300.bin', binary=True)
@@ -850,5 +850,5 @@ pdtb_data['train_Y'] = train_Y
 pdtb_data['test_X'] = test_X
 pdtb_data['test_Y'] = test_Y
 
-outfile = 'data/t5_embedding.pt'
+outfile = 'data/t5_embedding_large.pt'
 torch.save(pdtb_data,outfile)

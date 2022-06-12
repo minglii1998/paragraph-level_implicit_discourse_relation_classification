@@ -3,7 +3,7 @@ import torch
 pdtb_data = torch.load('data/pdtb_implicit_moreexplicit_discourse_withoutAltLex_paragraph_multilabel_addposnerembedding.pt')
 dev_X,dev_Y,train_X,train_Y,test_X,test_Y = pdtb_data['dev_X'],pdtb_data['dev_Y'],pdtb_data['train_X'] ,pdtb_data['train_Y'],pdtb_data['test_X'],pdtb_data['test_Y']
 
-pdtb_data_t5 = torch.load('data/t5_embedding.pt')
+pdtb_data_t5 = torch.load('data/t5_embedding_large.pt')
 dev_X_t5,dev_Y_t5,train_X_t5,train_Y_t5,test_X_t5,test_Y_t5 = \
     pdtb_data_t5['dev_X'],pdtb_data_t5['dev_Y'],pdtb_data_t5['train_X'] ,pdtb_data_t5['train_Y'],pdtb_data_t5['test_X'],pdtb_data_t5['test_Y']
 

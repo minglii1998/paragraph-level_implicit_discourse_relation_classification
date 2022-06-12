@@ -246,3 +246,4 @@ vis
 
 *.sh
 *.bin
+temp_config.py
