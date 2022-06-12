@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from zmq import device
+# from zmq import device
 from CRF_layer import CRF
 
 from self_attention import SelfAttention, DocSelfAttention

@@ -13,36 +13,24 @@ import gensim
 import nltk
 from nltk.tag import StanfordPOSTagger,StanfordNERTagger
 from nltk.parse.stanford import StanfordDependencyParser
-# from nltk.tokenize import StanfordTokenizer
 
+from transformers import T5Tokenizer, T5EncoderModel
+from zmq import device
+
+device = 'cpu'
+t5_tokenizer = T5Tokenizer.from_pretrained("t5-base",cache_dir="../cache/")
+t5_model =  T5EncoderModel.from_pretrained("t5-base",cache_dir="../cache/").to(device)
 
 # Load Google pretrained word2vec
-model = gensim.models.KeyedVectors.load_word2vec_format('data/resource/GoogleNews-vectors-negative300.bin', binary=True)
+# model = gensim.models.KeyedVectors.load_word2vec_format('data/resource/GoogleNews-vectors-negative300.bin', binary=True)
 # Load Glove pretrained word2vec
 #model = gensim.models.Word2Vec.load_word2vec_format('../resource/glove.840B.300d.w2vformat.txt', binary=False)
 
 # Load stored pos/ner parsing sentence
 sentence_pos_ner_dict = {}
-with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','rb') as f:
-	sentence_pos_ner_dict = cPickle.load(f, encoding="latin1")
-	f.close()
-
-#stanford_dir = '../resource/stanford-postagger-2016-10-31/'
-#modelfile = stanford_dir + 'models/english-left3words-distsim.tagger'
-#jarfile = stanford_dir + 'stanford-postagger.jar'
-#pos_tager = StanfordPOSTagger(modelfile, jarfile, encoding='utf8')
-#print pos_tager.tag("Brack Obama lives in New York .".split())
-
-#st = StanfordTokenizer(jarfile, encoding='utf8')
-#print st.tokenize('Among 33 men who worked closely with the substance, 28 have died -- more than three times the expected number. Four of the five surviving workers have asbestos-related diseases, including three with recently diagnosed cancer.')
-
-#stanford_dir = '../resource/stanford-ner-2016-10-31/'
-#modelfile = stanford_dir + 'classifiers/english.muc.7class.distsim.crf.ser.gz'
-#jarfile = stanford_dir + 'stanford-ner.jar'
-#ner_tager = StanfordNERTagger(modelfile, jarfile, encoding='utf8')
-#print ner_tager.tag("In Jan. 5, Brack Obama lives in New York at 5:20 .".split())
-#print ner_tager.tag(nltk.word_tokenize("Assets of the 400 taxable funds grew by $1.5 billion during the latest week, to $352.7 billion."))
-
+# with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','rb') as f:
+# 	sentence_pos_ner_dict = cPickle.load(f, encoding="latin1")
+# 	f.close()
 
 vocab={}
 def unknown_words(word,k=300):
@@ -216,6 +204,43 @@ def process_sentence(sentence, posner_flag = True, sentencemarker = False, param
 
 		return tansfer_word2vec(word_list, posner_flag = False)
 
+
+def get_embeddings(doc_sentence_list):
+	t5_token_list = []
+	t5_token_count_list = []
+	total_token_id = []
+	for i in range(len(doc_sentence_list)):
+		sent_i = doc_sentence_list[i]
+		toke_ = t5_tokenizer(sent_i,padding=True,return_tensors="pt").to(device)
+
+		# remove padding
+		toke_['attention_mask'] = toke_['attention_mask'][:,0:-1]
+		toke_['input_ids'] = toke_['input_ids'][:,0:-1]
+		length_ = sum(toke_['attention_mask'][0])
+
+		toke_decode = t5_tokenizer.decode(toke_["input_ids"][0])
+		t5_token_list.append(toke_)
+		t5_token_count_list.append(length_)
+		total_token_id.append(toke_["input_ids"])
+		pass
+	
+	conbined_tokens = t5_token_list[0].copy()
+	conbined_tokens["input_ids"] = torch.cat(total_token_id,dim=1)
+	conbined_tokens["attention_mask"] = torch.ones_like(conbined_tokens["input_ids"]).int()
+
+	assert sum(conbined_tokens['attention_mask'][0]) == sum(t5_token_count_list)
+	combined_embeddings = t5_model(**conbined_tokens)['last_hidden_state']
+
+	sent_embed_list = []
+	start_idx = 0
+	for i in range(len(t5_token_count_list)):
+		sent_embed_list.append(combined_embeddings[0,start_idx:start_idx+t5_token_count_list[i],:]) 
+		start_idx += t5_token_count_list[i]
+		pass
+
+	return sent_embed_list
+
+
 def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemarker = False, connectivemarker = False):
 	global para_length_list
 	print( "total number of documents:" + str(len(fold_discourse_relation_list)))
@@ -235,11 +260,12 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 			print( i)
 
 		doc_sentence_list,doc_discourse_dict = fold_discourse_relation_list[i][0],fold_discourse_relation_list[i][1]
-		paras_sentence_list,paras_y_list= process_doc_paras_labels(doc_sentence_list, doc_discourse_dict)
+		sent_embed_list = get_embeddings(doc_sentence_list)
+		paras_sentence_list,paras_y_list= process_doc_paras_labels(sent_embed_list, doc_discourse_dict)
 		
 		if len(paras_sentence_list) == 0:
 			continue
-
+		
 		for para_sentence_list, y in zip(paras_sentence_list, paras_y_list):
 			print (para_sentence_list)
 			print (y)
@@ -257,17 +283,8 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 			connective_position_list = []
 			para_length = 0
 			for sentence in para_sentence_list:
-				sentence_embedding = process_sentence(sentence, posner_flag = posner_flag, sentencemarker = sentencemarker)
+				sentence_embedding = sentence
 				sentence_embedding_list.append(sentence_embedding)
-
-				if connectivemarker:
-					if sentence_startwith_connective(sentence):
-						if sentence.strip()[0] == '"':
-							connective_position_list.append(para_length+1)
-						else:
-							connective_position_list.append(para_length)
-					else:
-						connective_position_list.append(-1)
 
 				para_length = para_length + sentence_embedding.size(0)
 				eos_position_list.append(para_length)
@@ -296,10 +313,7 @@ def fold_word2vec(fold_discourse_relation_list, posner_flag = True, sentencemark
 	print( 'Implicit discourse relation distribution')
 	print( y_implicit)
 	
-	if connectivemarker:
-		return (para_embedding_list,para_label_length_list,eos_position_lists,connective_position_lists),y_list
-	else:
-		return (para_embedding_list,para_label_length_list,eos_position_lists),y_list
+	return (para_embedding_list,para_label_length_list,eos_position_lists),y_list
 
 end_list = ('...', 'a.k.a.', 'A.E.', 'A.L.', 'A.P.', 'Alex.', 'Ark.)', '(c.i.f.)', '(f.o.b.)', 'C.B.', 'C.J.', 'C.J.B.', 'C.R.', 'C.W.', 'Del.', 'D.N.', 'D.S.', 'D.T.', 'E.C.', 'E.E.', 'E.W.', 'F.A.O.', 'F.C.', 'F.E.', 'F.H.', 'F.W.', 'G.O.', 'G.m.b.', 'G.m.b.H.', 'Gov.', 'H.G.', 'H.H.', 'H.L.', 'H.R.', 'I.E.P.', 'I.M.', 'I.W.', 'Ind.', 'Ind.)', 'J.', 'J.D.', 'J.E.', 'J.F.', 'J.L.', 'J.M.', 'J.V.', 'J.V.)', 'J.X.', 'Jos.A.', 'L.J.', 'L.L.', 'L.M.', 'M.A.', 'M.R.', 'Messrs.', 'Mr.', 'Mrs.', 'Ms.', 'Mass.)', 'Md.)', 'Miss.)', 'Mo.)', 'Mont.)', 'Neb.', 'No.', 'Nos.', 'R.D.', 'R.L.', 'R.P.', 'R.R.', 'Reps.', 'Sen.', 'Sens.', 'T.D.', 'T.T.', 'U.S.', 'V.H.', 'W.A.', 'W.D.', 'W.G.', 'W.I.', 'W.N.', 'W.T.', 'labs at the U.')
 def sentence_tokenizer(sentence):
@@ -759,7 +773,7 @@ implicit_filter_count = 0
 explicit_filter_count = 0
 double_label_count = 0
 def process_doc(pipe_file_path,raw_file_path):
-	pipe_file = open(pipe_file_path,'r')
+	pipe_file = open(pipe_file_path,'r',encoding = "ISO-8859-1")
 	raw_file = open(raw_file_path,'r',encoding = "ISO-8859-1")
 
 	pipe_file_lines = pipe_file.readlines()
@@ -814,8 +828,8 @@ training_fold_list = ['02','03','04','05','06','07','08','09','10','11','12','13
 dev_fold_list = ['00','01']
 test_fold_list = ['21','22']
 
-dev_X,dev_Y = process_fold(dev_fold_list)
 train_X,train_Y = process_fold(training_fold_list)
+dev_X,dev_Y = process_fold(dev_fold_list)
 test_X, test_Y = process_fold(test_fold_list)
 print( 'implicit filter count: ' + str(implicit_filter_count))
 print( 'explicit filter count: ' + str(explicit_filter_count))
@@ -824,9 +838,9 @@ print( 'double label count: ' + str(double_label_count))
 print( 'average para length: ' + str(sum(para_length_list) / float(len(para_length_list))))
 print( 'para length distribution: ' + str(np.unique(para_length_list, return_counts=True)))
 
-with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','w') as f:
-	cPickle.dump(sentence_pos_ner_dict,f)
-	f.close()
+# with open('data/resource/pdtb_sentence_pos_ner_dict.pkl','w') as f:
+# 	cPickle.dump(sentence_pos_ner_dict,f)
+# 	f.close()
 
 pdtb_data = {}
 pdtb_data['dev_X'] = dev_X
@@ -836,5 +850,5 @@ pdtb_data['train_Y'] = train_Y
 pdtb_data['test_X'] = test_X
 pdtb_data['test_Y'] = test_Y
 
-outfile = open('data/pdtb_try.pt','w')
+outfile = 'data/t5_embedding.pt'
 torch.save(pdtb_data,outfile)
