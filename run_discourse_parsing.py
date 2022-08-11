@@ -3,6 +3,7 @@ import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = '2' 
 
 import random
+from nbformat import write
 
 import torch
 import torch.nn as nn
@@ -293,6 +294,7 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
     logger.write_traing_log('----------------------------------------------------')
     logger.write_traing_log('Training start: ' + '#training_samples = ' + str(len(Y)))
     for epoch in range(1, n_epochs + 1):
+        start_time = time.time()
         logger.write_traing_log('epoch ' + str(epoch) + '/' + str(n_epochs))
         random.shuffle(random_list)
 
@@ -320,6 +322,9 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
                 target_length = 0
                 batch = []
 
+        with open('record_time.txt','a') as f:
+            f.write('training:'+str(time.time()-start_time)+'\n')
+
         if epoch % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
@@ -339,8 +344,10 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
 
             logger.write_traing_log( 'Evaluate on Implicit discourse relation')
             logger.write_traing_log( '----------------------------------------------------')
+            start_time_ = time.time()
             tmp_macro_Fscore, tmp_implicit_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha,discourse = 'implicit')
-            
+            with open('record_time.txt','a') as f:
+                f.write('testing:'+str(time.time()-start_time_)+'\n')
             if tmp_macro_Fscore > best_macro_Fscore:
                 best_macro_Fscore = tmp_macro_Fscore
                 best_result = (tmp_all_result, tmp_explicit_result, tmp_implicit_result)

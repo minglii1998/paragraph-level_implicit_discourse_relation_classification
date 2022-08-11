@@ -372,7 +372,7 @@ class Encoder_SA(nn.Module):
 
         self.hidden_size = hidden_size
 
-        self.word_sa = SelfAttention(self.input_dimension,self.input_dimension)
+        self.word_sa = SelfAttention(self.input_dimension,self.hidden_size)
         self.doc_sa = DocSelfAttention(self.input_dimension,self.hidden_size)
 
         if type(num_layers) == type(1):
