@@ -22,6 +22,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from temp_config import temp_config_model_name, temp_config_data_path, temp_config_logger
+from temp_config import extra_mixed_conf
 
 ######################################################################
 # This is a helper function to print time elapsed and estimated time
@@ -32,6 +33,11 @@ import math
 
 from logging_utils import SelfLogger
 logger = SelfLogger(temp_config_logger)
+
+def check_number(dev_X,dev_X_eos_list,dev_vec_dic_list):
+    assert len(dev_X) == len(dev_vec_dic_list)
+    for i in range(len(dev_X)):
+        assert dev_vec_dic_list[i]['local_sentence_embedding'].shape[0] == len(dev_X_eos_list[i])
 
 def asMinutes(s):
     m = math.floor(s / 60)
@@ -115,7 +121,7 @@ def calculate_loss(predict,target,criterion,alpha = 1):
         return -torch.dot(predict.view(-1),target.clamp(0,1).view(-1))- alpha*torch.dot(predict.view(-1),target.clamp(-1,0).abs().view(-1))
 
 
-def train(model,X,Y,optimizer,criterion,alpha = 1):
+def train(model,X,Y,optimizer,criterion,alpha = 1,extra_vector_list=None):
     optimizer.zero_grad()
     loss = 0
 
@@ -126,8 +132,9 @@ def train(model,X,Y,optimizer,criterion,alpha = 1):
         sample = X[i]
         sample_eos_list = X_eos_list[i]
         target = Y[i]
+        extra_vector = extra_vector_list[i]
 
-        output = model(sample, sample_eos_list, target)
+        output = model(sample, sample_eos_list, target, extra_vector=extra_vector)
         loss += calculate_loss(output,target,criterion, alpha = alpha)
 
     loss.backward()
@@ -187,7 +194,7 @@ def print_evaluation_result(result):
 
     return metrics.precision_recall_fscore_support(target_Y, predict_Y, average='macro')[2], result
 
-def evaluate(model,X,Y, criterion, epoch, alpha, discourse = 'implicit'):
+def evaluate(model,X,Y, criterion, epoch, alpha, discourse = 'implicit',extra_vector_list=None):
     model.eval()
     X_eos_list = X[1]
     X = X[0]
@@ -201,8 +208,9 @@ def evaluate(model,X,Y, criterion, epoch, alpha, discourse = 'implicit'):
         sample = X[i]
         sample_eos_list = X_eos_list[i]
         target = Y[i]
+        extra_vector = extra_vector_list[i]
 
-        predict = model(sample, sample_eos_list, target)
+        predict = model(sample, sample_eos_list, target, extra_vector=extra_vector)
         loss_ += calculate_loss(predict,target,criterion, alpha = alpha)
 
         if discourse == 'all':
@@ -263,7 +271,7 @@ def average_result(each_iteration_result_list):
     
     return (average_result_list(all_result_list),average_result_list(explicit_result_list),average_result_list(implicit_result_list))
 
-def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every=1, evaluate_every = 1, optimizer_type = 'adam', weight_decay = 0, alpha = 1, use_scheduler = False):
+def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every=1, evaluate_every = 1, optimizer_type = 'adam', weight_decay = 0, alpha = 1, use_scheduler = False, train_vec_dic_list=None, test_vec_dic_list=None):
     if optimizer_type == 'adadelta': 
         optimizer = optim.Adadelta(model.parameters(), lr = 0.5, weight_decay = weight_decay)  #baseseq2seq lr = 0.5
     elif optimizer_type == 'adagrad':
@@ -310,13 +318,15 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
                 batch_X_eos_list = []
                 batch_X = []
                 batch_Y = []
+                extra_vector_list = []
 
                 for index in batch:
                     batch_X.append(X[index])
                     batch_X_eos_list.append(X_eos_list[index])
                     batch_Y.append(Y[index])
+                    extra_vector_list.append(train_vec_dic_list[index])
 
-                loss = train(model, (batch_X, batch_X_eos_list), batch_Y, optimizer, criterion, alpha = alpha)
+                loss = train(model, (batch_X, batch_X_eos_list), batch_Y, optimizer, criterion, alpha = alpha, extra_vector_list=extra_vector_list)
                 print_loss_total += loss
 
                 target_length = 0
@@ -336,16 +346,16 @@ def trainEpochs(model, X, Y, valid_X, valid_Y, batch_size, n_epochs, print_every
             logger.write_traing_log('Step Evaluation: #valid_samples= ' + str(len(valid_Y)))
             logger.write_traing_log('Evaluate on Explicit/Implicit discourse relation')
             logger.write_traing_log( '----------------------------------------------------')
-            _, tmp_all_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha, discourse = 'all')
+            _, tmp_all_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha, discourse = 'all', extra_vector_list=test_vec_dic_list)
 
             logger.write_traing_log( 'Evaluate on Explicit discourse relation')
             logger.write_traing_log( '----------------------------------------------------')
-            _, tmp_explicit_result = evaluate(model,valid_X,valid_Y,  criterion, epoch, alpha = alpha, discourse = 'explicit')
+            _, tmp_explicit_result = evaluate(model,valid_X,valid_Y,  criterion, epoch, alpha = alpha, discourse = 'explicit', extra_vector_list=test_vec_dic_list)
 
             logger.write_traing_log( 'Evaluate on Implicit discourse relation')
             logger.write_traing_log( '----------------------------------------------------')
             start_time_ = time.time()
-            tmp_macro_Fscore, tmp_implicit_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha,discourse = 'implicit')
+            tmp_macro_Fscore, tmp_implicit_result = evaluate(model,valid_X,valid_Y, criterion, epoch, alpha = alpha,discourse = 'implicit', extra_vector_list=test_vec_dic_list)
             with open('record_time.txt','a') as f:
                 f.write('testing:'+str(time.time()-start_time_)+'\n')
             if tmp_macro_Fscore > best_macro_Fscore:
@@ -395,6 +405,13 @@ if __name__ == "__main__":
     word_embedding_dimension = test_X[0].size(-1)
     number_class = test_Y[0].size(-1)
 
+    ndp_vector_list = torch.load('LiMNet_pdtb_vec.pt')
+    dev_vec_dic_list, train_vec_dic_list, test_vec_dic_list = ndp_vector_list[0], ndp_vector_list[1], ndp_vector_list[2]
+
+    check_number(dev_X,dev_X_eos_list,dev_vec_dic_list)
+    check_number(train_X,train_X_eos_list,train_vec_dic_list)
+    check_number(test_X,test_X_eos_list,test_vec_dic_list)
+
     macro_F1_list = []
     for parameters in parameters_list:
         overall_best_result = None
@@ -404,14 +421,15 @@ if __name__ == "__main__":
         each_iteration_best_model_list = [] 
         each_iteration_macro_Fscore_list = []
 
-        for iteration in range(5):
+        for iteration in range(3):
             logger.change_iter_num(iteration)
             if temp_config_model_name == 'ori':
                 model = BaseSequenceLabelingSplitImpExp(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
                     sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
             elif temp_config_model_name == 'sa':
                 model = BaseSequenceLabelingSplitImpExp_SA(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
-                    sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
+                    sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], 
+                    dropout = parameters['dropout'], extra_mixed_conf=extra_mixed_conf)
             logger.write_model(model)
             #model = BaseSequenceLabelingSplitImpExp_LSTMEncoder(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
             #        sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'dot', NTN_flag = True, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
@@ -421,7 +439,8 @@ if __name__ == "__main__":
                                                                                                                                            #(dev_X, dev_X_eos_list), dev_Y
             best_macro_Fscore, best_result, best_model = trainEpochs(model, (train_X,train_X_label_length_list,train_X_eos_list), train_Y, (test_X, test_X_eos_list), test_Y, 
                                                     batch_size = parameters['batch_size'], n_epochs = parameters['nb_epoch'], optimizer_type = parameters['optimizer_type'], 
-                                                    weight_decay = parameters['weight_decay'], alpha = 1, use_scheduler = False)
+                                                    weight_decay = parameters['weight_decay'], alpha = 1, use_scheduler = False, 
+                                                    train_vec_dic_list=train_vec_dic_list, test_vec_dic_list=test_vec_dic_list)
             
             logger.write_traing_log( '----------------------------------------------------')
             logger.write_traing_log( 'Experiment Iteration ' +  str(iteration+1) + ' Evaluation: #test_samples= ' + str(len(test_Y)))

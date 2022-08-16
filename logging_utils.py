@@ -6,6 +6,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import classification_report, confusion_matrix
 
 from torch.utils.tensorboard import SummaryWriter  
+from temp_config import logger_name
 
 '''
 the structure of model
@@ -48,7 +49,7 @@ def get_suffix_without_seed(args):
 class SelfLogger(object):
     def __init__(self, name:str):
         super(SelfLogger, self).__init__()
-        self.model_dir_ori = osp.join('logs',name)
+        self.model_dir_ori = osp.join(logger_name,name)
 
         # used as the directory of this model
         # if exist, can mkdir directly

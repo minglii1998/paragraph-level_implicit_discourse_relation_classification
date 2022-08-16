@@ -9,8 +9,8 @@ class SelfAttention(nn.Module):
     def __init__(self, hidden_size, mid_dim):
         super(SelfAttention, self).__init__()
 
-        self.ws1 = nn.Linear(hidden_size, mid_dim)
-        self.ws2 = nn.Linear(mid_dim, 1)
+        self.ws1 = nn.Linear(hidden_size, hidden_size)
+        self.ws2 = nn.Linear(hidden_size, 1)
 
         self.drop = nn.Dropout(0.5)
         self.softmax = nn.Softmax(dim=1)

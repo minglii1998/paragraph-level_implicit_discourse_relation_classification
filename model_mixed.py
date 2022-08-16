@@ -687,7 +687,7 @@ class BaseSequenceLabelingSplitImpExp(nn.Module):
 
 
 class BaseSequenceLabelingSplitImpExp_SA(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size = 0, sentence_embedding_type = 'last', sentence_zero_inithidden = False, cross_attention = False, attention_function = 'dot', NTN_flag = False, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True):
+    def __init__(self, input_size, output_size, hidden_size = 0, sentence_embedding_type = 'last', sentence_zero_inithidden = False, cross_attention = False, attention_function = 'dot', NTN_flag = False, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True, extra_mixed_conf=None):
         super(BaseSequenceLabelingSplitImpExp_SA, self).__init__()
 
         if hidden_size <= 0:
@@ -697,6 +697,15 @@ class BaseSequenceLabelingSplitImpExp_SA(nn.Module):
         self.batch_size = batch_size
         self.cross_attention = cross_attention
         self.NTN_flag = NTN_flag
+
+        self.extra_mixed_conf = extra_mixed_conf
+        self.where_to_add = None
+        self.add_type = None
+        self.extra_ffn_dim = None
+        if self.extra_mixed_conf is not None:
+            self.where_to_add = self.extra_mixed_conf['where_to_add']
+            self.add_type = self.extra_mixed_conf['add_type']
+            self.extra_ffn_dim = self.extra_mixed_conf['extra_ffn_dim']
 
         self.encoder = Encoder_SA(input_size, hidden_size, batch_size=batch_size, num_layers=num_layers, dropout = dropout, bidirectional = bidirectional, batch_first = batch_first, sentence_embedding_type = sentence_embedding_type, sentence_zero_inithidden = sentence_zero_inithidden)
 
@@ -708,14 +717,45 @@ class BaseSequenceLabelingSplitImpExp_SA(nn.Module):
             self.explicit_out = nn.Linear(hidden_size*2, output_size)
             self.implicit_out = nn.Linear(hidden_size*6, output_size)
         else:
-            self.explicit_out = nn.Linear(hidden_size*2, output_size)
-            self.implicit_out = nn.Linear(hidden_size*2, output_size)
+            if self.where_to_add == 'before_classification':
+                if self.add_type in ['local_sentence_embedding', 'global_sentence_shift', 'mixed_sentence_embedding_1','mixed_sentence_embedding_2']:
+                    self.add_dim = 1024
+                elif self.add_type in ['pred', 'one_hot']:
+                    self.add_dim = 9
+                
+                if self.extra_ffn_dim == 0:
+                    self.explicit_out = nn.Linear((hidden_size+self.add_dim)*2, output_size)
+                    self.implicit_out = nn.Linear((hidden_size+self.add_dim)*2, output_size)
+                else:
+                    self.inter = nn.Linear(hidden_size+self.add_dim, self.extra_ffn_dim)
+                    self.explicit_out = nn.Linear(self.extra_ffn_dim*2, output_size)
+                    self.implicit_out = nn.Linear(self.extra_ffn_dim*2, output_size)
+                
+            else:
+                self.explicit_out = nn.Linear(hidden_size*2, output_size)
+                self.implicit_out = nn.Linear(hidden_size*2, output_size)
         
         self.softmax = nn.LogSoftmax()
         self.Dropout = nn.Dropout(dropout)
 
-    def forward(self, input, eos_position_list, target, connective_position_list = None):
+    def forward(self, input, eos_position_list, target, connective_position_list = None, extra_vector=None):
         word_level_output,sentence_level_output,_,_ = self.encoder(input,eos_position_list,connective_position_list)
+
+        if self.where_to_add == 'before_classification':
+            if self.add_type == 'one_hot':
+                extra_v = torch.zeros_like(extra_vector['pred']).to(device)
+                idxs = torch.argmax(extra_vector['pred'],dim=1)
+                for i in range(len(idxs)):
+                    extra_v[i][idxs[i]] = 1
+                sentence_level_output = torch.cat((sentence_level_output,extra_v.unsqueeze(0)),dim=2)
+            else:
+                extra_v = extra_vector[self.add_type].to(device).unsqueeze(0)
+                sentence_level_output = torch.cat((sentence_level_output,extra_v),dim=2)
+            
+            if self.extra_ffn_dim == 0:
+                pass
+            else:
+                sentence_level_output = self.inter(sentence_level_output)
 
         if self.batch_size == 1:
             output_list = []
