@@ -405,7 +405,7 @@ if __name__ == "__main__":
     word_embedding_dimension = test_X[0].size(-1)
     number_class = test_Y[0].size(-1)
 
-    ndp_vector_list = torch.load('LiMNet_pdtb_vec.pt')
+    ndp_vector_list = torch.load(extra_mixed_conf['mixed_vec_path'])
     dev_vec_dic_list, train_vec_dic_list, test_vec_dic_list = ndp_vector_list[0], ndp_vector_list[1], ndp_vector_list[2]
 
     check_number(dev_X,dev_X_eos_list,dev_vec_dic_list)
