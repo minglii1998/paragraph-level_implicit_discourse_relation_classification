@@ -185,7 +185,7 @@ sentence_embedding_type: ['last','mean','sum','max']
 sentence_zero_inithidden: whether to separate each DU in word-level LSTM
 '''
 class Encoder(nn.Module):
-    def __init__(self, input_size, hidden_size = 0, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True, sentence_embedding_type = 'last', sentence_zero_inithidden = False):
+    def __init__(self, input_size, hidden_size = 0, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True, sentence_embedding_type = 'last', sentence_zero_inithidden = False, extra_mixed_conf=None):
         super(Encoder, self).__init__()
 
         self.batch_size = batch_size
@@ -196,7 +196,23 @@ class Encoder(nn.Module):
         if hidden_size % 2 != 0 and bidirectional:
             hidden_size = hidden_size - 1
 
+        self.extra_mixed_conf = extra_mixed_conf
+        self.where_to_add = None
+        self.add_type = None
+        self.extra_ffn_dim = None
+        if self.extra_mixed_conf is not None:
+            self.where_to_add = self.extra_mixed_conf['where_to_add']
+            self.add_type = self.extra_mixed_conf['add_type']
+
         self.hidden_size = hidden_size
+        self.hidden_size_s = hidden_size
+        if self.where_to_add == 'in_du_lstm':
+            if self.add_type in ['local_sentence_embedding', 'global_sentence_shift', 'mixed_sentence_embedding_1','mixed_sentence_embedding_2']:
+                self.hidden_size_s = hidden_size + 1024
+            elif self.add_type in ['pred', 'one_hot']:
+                self.hidden_size_s = hidden_size + 10
+                # typically the size should be devided by 2, in case of bidirectional setting
+
         self.dropout = dropout
         self.batch_first = batch_first
         self.bidirectional = bidirectional
@@ -226,7 +242,7 @@ class Encoder(nn.Module):
         )
 
         self.sentence_level_lstm = nn.LSTM(
-            self.hidden_size,
+            self.hidden_size_s,
             self.lstm_unit,
             self.sentence_level_num_layers,
             bidirectional=self.bidirectional,
@@ -235,9 +251,27 @@ class Encoder(nn.Module):
         )
         self.Dropout = nn.Dropout(dropout)
 
-    def forward(self,input,eos_position_list,connective_position_list=None):
+    def forward(self,input,eos_position_list,connective_position_list=None,extra_vector=None):
         word_hidden,sentence_hidden = self.initHidden()
         input = self.Dropout(input)
+
+        if self.where_to_add == 'in_du_lstm':
+            if self.add_type == 'one_hot':
+                extra_v = torch.zeros_like(extra_vector['pred']).to(device)
+                idxs = torch.argmax(extra_vector['pred'],dim=1)
+                for i in range(len(idxs)):
+                    extra_v[i][idxs[i]] = 1
+                padding = torch.zeros(extra_v.shape[0],extra_v.shape[1],1).to(device)
+                extra_v = torch.cat((extra_v,padding),2)
+                # sentence_level_output = torch.cat((sentence_level_output,extra_v.unsqueeze(0)),dim=2)
+            elif self.add_type == 'pred':
+                extra_v = extra_vector[self.add_type].to(device).unsqueeze(0)
+                padding = torch.zeros(extra_v.shape[0],extra_v.shape[1],1).to(device)
+                extra_v = torch.cat((extra_v,padding),2)
+            else:
+                extra_v = extra_vector[self.add_type].to(device).unsqueeze(0)
+                # sentence_level_output = torch.cat((sentence_level_output,extra_v),dim=2)
+            
 
         if self.batch_size == 1:
             #process sample one by one
@@ -286,6 +320,7 @@ class Encoder(nn.Module):
             sentence_level_input = torch.stack(sentence_embedding_list)
             sentence_level_input = sentence_level_input.view(1,-1,self.hidden_size)
 
+            sentence_level_input = torch.cat((sentence_level_input,extra_v),2)
             sentence_level_input = self.Dropout(sentence_level_input)
             sentence_level_output, sentence_hidden = self.sentence_level_lstm(sentence_level_input, sentence_hidden)
             #sentence_level_output = self.Dropout(sentence_level_output)
@@ -613,7 +648,7 @@ class BaseSequenceLabeling(nn.Module):
 
 
 class BaseSequenceLabelingSplitImpExp(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size = 0, sentence_embedding_type = 'last', sentence_zero_inithidden = False, cross_attention = False, attention_function = 'dot', NTN_flag = False, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True):
+    def __init__(self, input_size, output_size, hidden_size = 0, sentence_embedding_type = 'last', sentence_zero_inithidden = False, cross_attention = False, attention_function = 'dot', NTN_flag = False, batch_size = 1, num_layers = 1, dropout = 0, bidirectional = True, batch_first = True, extra_mixed_conf=None):
         super(BaseSequenceLabelingSplitImpExp, self).__init__()
 
         if hidden_size <= 0:
@@ -624,7 +659,16 @@ class BaseSequenceLabelingSplitImpExp(nn.Module):
         self.cross_attention = cross_attention
         self.NTN_flag = NTN_flag
 
-        self.encoder = Encoder(input_size, hidden_size, batch_size=batch_size, num_layers=num_layers, dropout = dropout, bidirectional = bidirectional, batch_first = batch_first, sentence_embedding_type = sentence_embedding_type, sentence_zero_inithidden = sentence_zero_inithidden)
+        self.extra_mixed_conf = extra_mixed_conf
+        self.where_to_add = None
+        self.add_type = None
+        self.extra_ffn_dim = None
+        if self.extra_mixed_conf is not None:
+            self.where_to_add = self.extra_mixed_conf['where_to_add']
+            self.add_type = self.extra_mixed_conf['add_type']
+            self.extra_ffn_dim = self.extra_mixed_conf['extra_ffn_dim']
+
+        self.encoder = Encoder(input_size, hidden_size, batch_size=batch_size, num_layers=num_layers, dropout = dropout, bidirectional = bidirectional, batch_first = batch_first, sentence_embedding_type = sentence_embedding_type, sentence_zero_inithidden = sentence_zero_inithidden, extra_mixed_conf=extra_mixed_conf)
 
         if self.cross_attention:
             self.soft_attention = SoftAttention(hidden_size, attention_function = attention_function, nonlinear = False, temporal = False)
@@ -640,8 +684,8 @@ class BaseSequenceLabelingSplitImpExp(nn.Module):
         self.softmax = nn.LogSoftmax()
         self.Dropout = nn.Dropout(dropout)
 
-    def forward(self, input, eos_position_list, target, connective_position_list = None):
-        word_level_output,sentence_level_output,_,_ = self.encoder(input,eos_position_list,connective_position_list)
+    def forward(self, input, eos_position_list, target, connective_position_list = None, extra_vector=None):
+        word_level_output,sentence_level_output,_,_ = self.encoder(input,eos_position_list,connective_position_list,extra_vector=extra_vector)
 
         if self.batch_size == 1:
             output_list = []

@@ -425,7 +425,8 @@ if __name__ == "__main__":
             logger.change_iter_num(iteration)
             if temp_config_model_name == 'ori':
                 model = BaseSequenceLabelingSplitImpExp(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
-                    sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], dropout = parameters['dropout'])
+                    sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], 
+                    dropout = parameters['dropout'], extra_mixed_conf=extra_mixed_conf)
             elif temp_config_model_name == 'sa':
                 model = BaseSequenceLabelingSplitImpExp_SA(word_embedding_dimension, number_class, hidden_size=parameters['hidden_size'], sentence_embedding_type = parameters['sentence_embedding_type'], 
                     sentence_zero_inithidden = parameters['sentence_zero_inithidden'], cross_attention = False, attention_function = 'feedforward', NTN_flag = False, num_layers = parameters['num_layers'], 

@@ -247,3 +247,5 @@ vis
 *.sh
 *.bin
 record_time.txt
+relation_count.txt
+temp.py
