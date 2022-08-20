@@ -375,6 +375,11 @@ class Encoder_SA(nn.Module):
         self.word_sa = SelfAttention(self.input_dimension,self.hidden_size)
         self.doc_sa = DocSelfAttention(self.input_dimension,self.hidden_size)
 
+        self.no_local = False
+        self.no_global = False
+        if self.no_global:
+            self.ws3 = nn.Linear(self.input_dimension, self.hidden_size)
+
         if type(num_layers) == type(1):
             self.word_level_num_layers = num_layers
             self.sentence_level_num_layers = num_layers
@@ -393,14 +398,23 @@ class Encoder_SA(nn.Module):
         word_in_edu = max(len_list)
         edu_size = len(eos_position_list)
 
-        tensor_holder = torch.zeros(self.batch_size,edu_size,word_in_edu,self.input_dimension).to(device)
-        mask_holder = torch.zeros(self.batch_size,edu_size,word_in_edu).to(device)
-        for i in range(len(temp_eos_position_list)-1):
-            tensor_holder[0,i,0:len_list[i],:] = input[0,temp_eos_position_list[i]:temp_eos_position_list[i+1],:]
-            mask_holder[0,i,0:len_list[i] ] = 1
         
-        sentence_emb = self.word_sa(tensor_holder,mask_holder).view(self.batch_size,edu_size,-1)
-        global_sentence_emb = self.doc_sa(input,sentence_emb )
+        if self.no_local:
+            sentence_emb = torch.zeros(self.batch_size,edu_size,self.input_dimension).to(device)
+            for i in range(len(temp_eos_position_list)-1):
+                sentence_emb[0,i,:] = torch.mean(input[0,temp_eos_position_list[i]:temp_eos_position_list[i+1],:])
+        else:
+            tensor_holder = torch.zeros(self.batch_size,edu_size,word_in_edu,self.input_dimension).to(device)
+            mask_holder = torch.zeros(self.batch_size,edu_size,word_in_edu).to(device)
+            for i in range(len(temp_eos_position_list)-1):
+                tensor_holder[0,i,0:len_list[i],:] = input[0,temp_eos_position_list[i]:temp_eos_position_list[i+1],:]
+                mask_holder[0,i,0:len_list[i] ] = 1
+            sentence_emb = self.word_sa(tensor_holder,mask_holder).view(self.batch_size,edu_size,-1)
+
+        if self.no_global:
+            global_sentence_emb = self.ws3(sentence_emb)
+        else:
+            global_sentence_emb = self.doc_sa(input,sentence_emb )
 
         if self.batch_size == 1:
             #process sample one by one
